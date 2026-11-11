@@ -1,19 +1,36 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
-import { dateTime, money, percent, quantity } from "./format";
+import { Allocation } from "./components/Allocation";
+import { Header } from "./components/Header";
+import { Indicators } from "./components/Indicators";
+import { Panel, Needs } from "./components/ui";
+import { Sectors } from "./components/Sectors";
+import { makeDisplay } from "./display";
 import { t } from "./strings";
-import type { Portfolio } from "./types";
+import type { DataQuality, Overview, Portfolio } from "./types";
 
-// Functional first version: proves the data path end to end. The visual design from
-// Claude Design replaces the markup; types, api and format stay.
+// Remembers small per-viewer choices (theme, hidden values). Never required to work.
+function stored(key: string, fallback = false): boolean {
+  try { const v = localStorage.getItem(key); return v === null ? fallback : v === "1"; } catch { return fallback; }
+}
+function remember(key: string, value: boolean) {
+  try { localStorage.setItem(key, value ? "1" : "0"); } catch { /* private mode: ignore */ }
+}
+
 export default function App() {
-  const [data, setData] = useState<Portfolio | null>(null);
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
+  const [quality, setQuality] = useState<DataQuality | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [dark, setDark] = useState(() => stored("dark", true));
+  const [hide, setHide] = useState(() => stored("hide"));
 
   const load = useCallback(() => {
-    api.portfolio().then(setData).catch((e) => setError(String(e)));
+    Promise.all([api.overview(), api.portfolio(), api.dataQuality()])
+      .then(([o, p, q]) => { setOverview(o); setPortfolio(p); setQuality(q); setError(null); })
+      .catch((e) => setError(String(e)));
   }, []);
   useEffect(load, [load]);
 
@@ -23,13 +40,7 @@ export default function App() {
     try {
       const result = await api.refreshQuotes();
       const failed = Object.keys(result.failures);
-      setMessage(
-        result.skipped
-          ? t.refreshSkipped
-          : failed.length
-            ? `${t.refreshFailed}: ${failed.join(", ")}`
-            : null,
-      );
+      setMessage(result.skipped ? t.refreshSkipped : failed.length ? `${t.refreshFailed}: ${failed.join(", ")}` : null);
       load();
     } catch (e) {
       setMessage(String(e));
@@ -38,83 +49,72 @@ export default function App() {
     }
   }
 
-  if (error) return <p>{t.error}: {error}</p>;
-  if (!data) return <p>{t.loading}</p>;
-  const { totals } = data;
+  const d = useMemo(() => makeDisplay(hide), [hide]);
 
+  if (error) return <div className="app"><div className="wrap"><p>{t.error}: {error}</p></div></div>;
+  if (!overview || !portfolio) return <div className="app"><div className="wrap"><p>{t.loading}</p></div></div>;
+
+  const alerts = overview.alerts;
   return (
-    <main style={{ fontFamily: "sans-serif", padding: 24, maxWidth: 1000, margin: "0 auto" }}>
-      <h1>{t.appTitle}</h1>
+    <div className={`app theme-${dark ? "dark" : "light"}`}>
+      <div className="wrap" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <Header
+          quotesAsOf={overview.quotes_as_of}
+          dataStatus={quality?.status ?? null}
+          hide={hide} dark={dark} refreshing={refreshing}
+          onHide={() => { remember("hide", !hide); setHide(!hide); }}
+          onTheme={() => { remember("dark", !dark); setDark(!dark); }}
+          onRefresh={refreshQuotes}
+        />
+        {message && <span className="chip am" role="status" style={{ alignSelf: "flex-start" }}>{message}</span>}
 
-      <section style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-        <Card label={t.invested} value={money(totals.invested)} />
-        <Card label={t.marketValue} value={money(totals.market_value)} />
-        <Card label={t.unrealizedProfit} value={money(totals.unrealized_profit)} signed={totals.unrealized_profit} />
-        <Card label={t.realizedProfit} value={money(totals.realized_profit)} signed={totals.realized_profit} />
-        <Card label={t.payoutsReceived} value={money(totals.payouts_received)} />
-      </section>
-
-      <p>
-        <button onClick={refreshQuotes} disabled={refreshing}>
-          {refreshing ? t.refreshing : t.refreshQuotes}
-        </button>{" "}
-        {totals.quotes_as_of && <small>{t.quotesAsOf} {dateTime(totals.quotes_as_of)}</small>}{" "}
-        {message && <small>· {message}</small>}
-      </p>
-
-      <h2>{t.byType}</h2>
-      <ul>
-        {data.by_type.map((row) => (
-          <li key={row.type}>
-            {t.types[row.type] ?? row.type}: {money(row.market_value)} ({percent(row.share)})
-          </li>
-        ))}
-      </ul>
-
-      <h2>{t.positions} ({data.positions.length})</h2>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr style={{ textAlign: "right" }}>
-            <th style={{ textAlign: "left" }}>{t.ticker}</th>
-            <th>{t.quantity}</th>
-            <th>{t.averagePrice}</th>
-            <th>{t.price}</th>
-            <th>{t.value}</th>
-            <th>{t.result}</th>
-            <th>{t.share}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.positions.map((p) => (
-            <tr key={p.ticker} style={{ textAlign: "right", borderTop: "1px solid #ddd" }}>
-              <td style={{ textAlign: "left" }} title={p.name ?? ""}>{p.ticker}</td>
-              <td>{quantity(p.quantity)}</td>
-              <td>{money(p.average_price)}</td>
-              <td>{p.price === null ? "—" : money(p.price)}</td>
-              <td title={p.valued_by === "cost" ? t.valuedAtCost : p.quoted_at ? dateTime(p.quoted_at) : ""}>
-                {money(p.market_value)}
-              </td>
-              <td style={{ color: color(p.unrealized_profit) }}>
-                {p.unrealized_profit === null ? "—" : money(p.unrealized_profit)}
-              </td>
-              <td>{percent(p.share)}</td>
-            </tr>
+        <nav className="tabs" aria-label="Telas">
+          <button className="tab on" type="button" aria-current="page">{t.tabs.overview}</button>
+          {[t.tabs.stocks, t.tabs.fiis, t.tabs.discipline].map((name) => (
+            <button key={name} className="tab" type="button" aria-disabled="true" title={t.tabs.nextStep}>
+              {name} <span className="soon">{t.tabs.soon}</span>
+            </button>
           ))}
-        </tbody>
-      </table>
-    </main>
-  );
-}
+        </nav>
 
-function color(n: number | null) {
-  return n === null || n === 0 ? undefined : n > 0 ? "#127a3a" : "#b3261e";
-}
+        {alerts.length > 0 ? (
+          <section className="card" aria-label={t.alertsLabel} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "12px 16px", padding: "14px 18px", borderColor: "var(--am-ln)", background: "linear-gradient(var(--am-soft), var(--am-soft)), var(--sf)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--am)", fontWeight: 700, fontSize: 14 }}>
+              <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9.5 17h-19L12 3z" /><path d="M12 10v4M12 17.5v.5" /></svg>
+              {alerts.length} {alerts.length > 1 ? t.alertsMany : t.alertsOne}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {alerts.map((a) => (
+                <span key={a.text} className="chip am" style={{ height: "auto", minHeight: 28, whiteSpace: "normal", padding: "4px 11px" }}>{a.text}</span>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <section className="card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", fontWeight: 600, fontSize: 14 }}>
+            <svg className="ic" style={{ color: "var(--up)" }} viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+            {t.allGood}
+          </section>
+        )}
 
-function Card({ label, value, signed }: { label: string; value: string; signed?: number }) {
-  return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, minWidth: 160 }}>
-      <small>{label}</small>
-      <div style={{ fontSize: 20, fontWeight: 600, color: color(signed ?? null) }}>{value}</div>
+        <Indicators o={overview} d={d} />
+
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(520px, 100%), 1fr))", gap: 16 }}>
+          <Allocation allocation={overview.allocation} />
+          <Sectors positions={portfolio.positions} total={overview.total} />
+        </section>
+
+        <Panel title={t.timeline.title} subtitle={t.timeline.subtitle}><Needs text={t.needs.history} /></Panel>
+
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(520px, 100%), 1fr))", gap: 16 }}>
+          <Panel title={t.contribution.title} subtitle={t.contribution.subtitle}><Needs text={t.contribution.needs} /></Panel>
+          <Panel title={t.calendar.title} subtitle={t.calendar.subtitle}><Needs text={t.calendar.needs} /></Panel>
+        </section>
+
+        <footer style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: "8px 24px", fontSize: 12, color: "var(--mu)", paddingTop: 4 }}>
+          <span>{t.footer}</span>
+          <span>{t.footerNote}</span>
+        </footer>
+      </div>
     </div>
   );
 }

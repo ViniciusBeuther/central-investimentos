@@ -37,3 +37,18 @@ export type RefreshResult = {
   fetched: number;
   failures: Record<string, string>;
 };
+
+export type Overview = {
+  quotes_as_of: string | null;
+  total: number;
+  contributed: number;
+  appreciation: number;
+  appreciation_share: number;
+  payouts: { months: { month: string; total: number }[]; total_12m: number; this_month: number; monthly_average: number };
+  largest_position: { ticker: string; weight: number; limit: number } | null;
+  allocation: { class: "rf" | "acoes" | "fii"; value: number; weight: number; target: number | null }[];
+  alerts: { kind: string; text: string }[];
+  missing: string[];
+};
+
+export type DataQuality = { status: "ok" | "attention"; checks: { name: string; status: string; detail: string }[] };

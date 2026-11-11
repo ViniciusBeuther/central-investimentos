@@ -1,4 +1,4 @@
-import type { Portfolio, RefreshResult } from "./types";
+import type { DataQuality, Overview, Portfolio, RefreshResult } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, init);
@@ -8,5 +8,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   portfolio: () => request<Portfolio>("/portfolio"),
+  overview: () => request<Overview>("/overview"),
+  dataQuality: () => request<DataQuality>("/data-quality"),
   refreshQuotes: () => request<RefreshResult>("/quotes/refresh", { method: "POST" }),
 };
