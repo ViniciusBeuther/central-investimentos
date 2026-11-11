@@ -80,7 +80,7 @@ Read-only analysis of `Negociações.xlsx` (122 rows) and `Dividendos Recebidos.
 - TASA4F bonus: confirmed (+2.80 on 2025-05-09, 0.80 sold for R$ 5.40). Only the cost per
   bonus share is still missing.
 - WEGE3 JCP duplicate: the raw payout files also contain identical repeated lines
-  (7 in total); kept as they come from B3.
+  (only 1 in the new import: WEGE3 2025-12-12); kept as they come from B3.
 
 No other problems: no negative positions, no exact duplicate rows in trades, and
 `Mês`/`Ano` consistent with the dates.

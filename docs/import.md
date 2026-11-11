@@ -56,6 +56,58 @@ Extra behaviors:
 - The guard warns instead of blocking when it finds an ambiguous case (e.g. the WEGE3 JCP
   pair, which may be legitimate), and the user decides.
 
+## Implementation status
+
+**Trades importer (done: parse, report, write)**: `backend/app/importers/trades.py`.
+```
+# dry run: reads, validates, reports; writes nothing
+docker compose exec api python -W ignore -m app.importers.trades "temp-data/<file>.xlsx"
+# import for real
+docker compose exec api python -W ignore -m app.importers.trades "temp-data/<file>.xlsx" \
+    --commit --types temp-data/asset_types.json
+```
+- `asset_types.json` (`{"TICKER": "fii"}`) lives in the git-ignored `temp-data/`, so the
+  list of owned assets never reaches the repository. Unambiguous tickers are typed
+  automatically; any other new ticker without a type aborts the import (nothing written).
+- The whole import is one transaction: all rows or none. Each run is recorded in
+  `import_batches` (file, rows added, rows skipped).
+- Duplicates: `INSERT ... ON CONFLICT (fingerprint, occurrence) DO NOTHING`.
+- Verified in a throwaway database: partial file (60 rows) → full file (65 added, 60
+  skipped) → full file again (0 added, 125 skipped); totals match the file (125 rows, 30
+  assets, bought 16,014.56, sold 2,436.85). A missing type blocks the import and leaves
+  the database empty. This test caught a real bug (ticker/id unpacked in the wrong order)
+  that an empty database hid, so keep testing re-imports, not only first imports.
+- Real import done in the dev database: 125 rows, 30 assets (14 stock, 13 fii, 2 fiagro,
+  1 etf); re-running added 0.
+- Reads the raw B3 file with `openpyxl` (not `read_only`: B3 files do not declare their
+  dimensions and read-only mode returns only the first column).
+- Validates required columns, normalizes the fractional `F` only when `Mercado` is
+  `Mercado Fracionário`, builds the fingerprint and occurrence, warns on value ≠
+  quantity × price and on sales with value 0. Unknown movement types are skipped with a
+  warning, never silently.
+- Quantities and values are parsed as `Decimal` from their text form, never from floats.
+- Result on the real file (125 rows, 113 buys, 12 sells, 2022-12-08 → 2026-09-23, 30
+  assets, 47 fractional rows): zero warnings, no repeated rows.
+- Position calculation and comparison with the old system: done, see `positions.md`.
+- Movimentação importer, step 1 (report only, writes nothing):
+  `backend/app/importers/movements.py`. On the real file: 1053 rows, 0 unknown movement
+  types, 50 corporate rows (8 bonus, 2 split, 1 reverse split, 10 fractions + 10 auctions
+  that pair up exactly, 16 `Transferência`), 4 fixed income products, 8 snapshots.
+- Corporate events written (`--commit`): 14 events (split, reverse split, bonus, fraction
+  with its auction cash) in `corporate_actions`, idempotent (re-run: 0 added), migration
+  `0002` adds fingerprint/occurrence/batch to that table. AMER1/AMER95 transfers are
+  ignored on the user's instruction.
+- `Transferência` imported as `transfer_out`/`transfer_in` (KLBN), 33 corporate events in
+  total; KLBN3 and KLBN4 assets are created by the importer (type is unambiguous).
+- Payouts importer done, with the quantity cross-check: see `payouts.md`.
+- Not done yet: fixed income, upload screen (the command line is the interim interface).
+
+Asset type suggestion: only unambiguous tickers (4 letters + 3 to 6) are suggested as
+`stock`. Tickers ending in 11 are decided by the user; the official product name in the
+Movimentação report settles it (name with "FII" / "FDO INV IMOB" → `fii`, "FIAGRO" →
+`fiagro`, a company name → `stock`, a unit of a company, "FIC EM FUNDO DE INDICE" →
+`etf`).
+
 ## Routine: what to upload and in which cases
 
 Three B3 files cover everything. The user drops them all at once; the system detects each

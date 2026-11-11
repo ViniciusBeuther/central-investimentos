@@ -112,6 +112,17 @@ CREATE INDEX ON corporate_actions (asset_id, action_date);
 CREATE INDEX ON payouts (asset_id, pay_date);
 ```
 
+## Migration 0002
+Adds `fingerprint`, `occurrence` (unique together) and `import_batch_id` to
+`corporate_actions`, and the `movements` source to `import_batches`. Corporate action
+quantities are stored as B3 reports them (split: extra shares; reverse split: resulting
+shares); `ratio_from/ratio_to` stay unused for imported rows. Verified: upgrade,
+downgrade, upgrade on the dev database.
+
+## Migration 0003
+`corporate_actions.kind` also accepts `transfer_out` and `transfer_in` (B3 `Transferência`,
+e.g. KLBN11 → KLBN3 + KLBN4). Relaxes a CHECK only. See `corporate-actions.md`.
+
 ## Decisions to review
 
 1. **Fractional ticker `F` is stripped** (`BBAS3F` → asset `BBAS3`); the original stays in

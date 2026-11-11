@@ -80,6 +80,8 @@ brapi.dev/yfinance (quotes), Central Bank SGS (CDI, Selic, IPCA), Tesouro Transp
 - `database.md`: approved schema (DDL, decisions, open questions).
 - `import.md`: design of the B3 file import (idempotent, preview, validations).
 - `corporate-actions.md`: splits, reverse splits, bonus and fractions.
+- `payouts.md`: payouts import and the quantity cross-check against B3.
+- `positions.md`: weighted average calculation, tests, comparison with the old system.
 
 ## Conventions
 - Simplest solution first; no abstractions or dependencies without a real need.
@@ -99,14 +101,12 @@ brapi.dev/yfinance (quotes), Central Bank SGS (CDI, Selic, IPCA), Tesouro Transp
 - Raw trades have no corporate events; they come from the B3 Movimentação report
   (`movimentacao-*.xlsx` in `backend/temp-data/`), which also has fixed income and
   position snapshots (`Atualização`). Details in `docs/import.md`.
-- Raw payout files contain identical repeated lines (7 across files); keep both, as they
+- Raw payout files contain 1 repeated identical line (WEGE3 JCP 2025-12-12); keep both, as they
   come from B3 (occurrence counter).
 - Fixed income: the B3 Movimentação report has Tesouro, 2 CDBs and 1 LCA (purchase,
   maturity, interest, units and unit price) but not the index/rate: the user supplies
   those once per product. Confirm no other fixed income lives outside B3.
 - Authentication mechanism (single-user login is the simplest).
-- Asset conversion event (KLBN11 → KLBN3 + KLBN4, `Transferência`) is not modeled yet;
-  design it when implementing corporate actions (`docs/corporate-actions.md`).
 - Idea to adopt: validate computed positions against the `Quantidade` of each payout row.
 
 ## Roadmap
@@ -114,8 +114,13 @@ brapi.dev/yfinance (quotes), Central Bank SGS (CDI, Selic, IPCA), Tesouro Transp
 - [x] Read `Wallet.py`, document legacy rules and data anomalies
 - [x] Database schema drafted and approved (`docs/database.md`)
 - [x] Alembic and first migration (`0001`, verified; see `docs/database.md`)
-- [ ] B3 file importer, totals checked against the old system
-- [ ] Corporate actions (split, reverse split, bonus, fractions)
+- [ ] B3 file importer, totals checked against the old system (trades import done and
+      idempotent; positions by weighted average done and compared with the old system,
+      see `docs/positions.md`; corporate events imported from Movimentação and applied;
+      payouts imported and cross-checked, see `docs/payouts.md`;
+      next: fixed income import, bonus cost per share)
+- [ ] Corporate actions (split, reverse split, bonus, fractions: imported and applied;
+      KLBN transfers done; missing: bonus cost per share, manual entry form)
 - [ ] Minimal API and screens (portfolio, totals, payouts)
 - [ ] Fixed income module
 - [ ] CVM collector (1 source, 1 asset) and document storage

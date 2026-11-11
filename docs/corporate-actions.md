@@ -115,9 +115,21 @@ It must come from the company notice (stored in `source_url`) or be entered manu
 (2026-09-02), which equals 2 (after the split) + 14 + 20 + 22 bought. This is a
 second cross-check of the position logic, next to the payout `Quantidade`.
 
-**Unit unbundling (KLBN11 → KLBN3 + KLBN4, `Transferência`, 2024-05-09)** moves quantity
-between tickers. The model needs an "asset conversion" event; to design when KLBN is
-implemented (cost basis must be split between the two new tickers).
+**Unit unbundling (KLBN11 → KLBN3 + KLBN4, `Transferência`): modeled and imported.**
+What really happened (checked against the numbers): Klabin paid a bonus in *units*
+(KLBN11 +0.7 on 2024-05-08, +0.13 on 2025-12-19), but a unit cannot be fractional, so B3
+unbundled the bonus into its parts (1 unit = 1 KLBN3 + 4 KLBN4): KLBN11 −0.7, KLBN3 +0.7,
+KLBN4 +2.8. The fractions of KLBN3 and KLBN4 were then sold at auction; 2 whole KLBN4
+shares stayed (the 2025 round left no whole share). The held units were never converted:
+KLBN11 stays at 27.
+- Model: kinds `transfer_out` (debit) and `transfer_in` (credit) in `corporate_actions`
+  (migration `0003`), one row per B3 line. Quantity moves; the cost that travels is
+  `quantity × cost_per_share` of the row (unknown = 0, with a warning, like bonuses).
+- Why not a single "conversion" row: B3 reports each side as separate lines, several per
+  day; two kinds keep the import one-to-one with the file and need no pairing logic.
+- Result: KLBN11 27, KLBN3 0, KLBN4 2 (cost unknown), and the auctions book R$ 9.10 of cash.
+- A pure ticker rename would need the cost to follow: fill `cost_per_share` on both
+  sides (not needed in the data so far).
 
 ## Cross-check: payout quantities
 
