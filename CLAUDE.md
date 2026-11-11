@@ -30,6 +30,8 @@ system informs, summarizes and suggests, never orders.
   - Frontend: http://localhost:3000 (the Mac's port 5173 is used by another project)
   - API: http://localhost:8000/api/health | Postgres: localhost:5432
 - The frontend calls `/api/...` and Vite proxies it to the API (no CORS).
+- Quotes: brapi.dev free plan, token in `.env` as `BRAPI_TOKEN` (see `.env.example`,
+  `docs/quotes.md`); the `worker` service refreshes them every 30 min in market hours.
 - Hosting TBD (Railway charges after trial; free alternative: Neon/Supabase + Render/Fly).
 
 ## Project rules
@@ -80,6 +82,8 @@ brapi.dev/yfinance (quotes), Central Bank SGS (CDI, Selic, IPCA), Tesouro Transp
 - `database.md`: approved schema (DDL, decisions, open questions).
 - `import.md`: design of the B3 file import (idempotent, preview, validations).
 - `corporate-actions.md`: splits, reverse splits, bonus and fractions.
+- `frontend.md`: frontend files and how the design plugs in.
+- `quotes.md`: brapi quotes, token setup, valuation rules.
 - `api.md`: read-only endpoints for the screens.
 - `fixed-income.md`: CDB/LCA/Tesouro model, imported data, caveats.
 - `payouts.md`: payouts import and the quantity cross-check against B3.
@@ -124,8 +128,9 @@ brapi.dev/yfinance (quotes), Central Bank SGS (CDI, Selic, IPCA), Tesouro Transp
       next: bonus cost per share)
 - [ ] Corporate actions (split, reverse split, bonus, fractions: imported and applied;
       KLBN transfers done; missing: bonus cost per share, manual entry form)
-- [ ] Minimal API and screens (portfolio, totals, payouts): read-only API done, see
-      `docs/api.md`; screens by Claude Design, in progress
+- [ ] Minimal API and screens (portfolio, totals, payouts): read-only API and brapi quotes done (verified with the real token: 21 of 21
+      quotable positions), see `docs/api.md`, `docs/quotes.md`; automatic refresh (`worker`) done; frontend data layer and a plain home page
+      done (`docs/frontend.md`); the visual design from Claude Design is next
 - [ ] Fixed income module (import done; missing: index/rate, current value estimate)
 - [ ] CVM collector (1 source, 1 asset) and document storage
 - [ ] Summary with verified quotes (`claude -p`)
