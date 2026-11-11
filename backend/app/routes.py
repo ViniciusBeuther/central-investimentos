@@ -5,6 +5,7 @@ Decimal (see positions.py): floats only appear at the very edge, in `num()`.
 """
 import os
 from collections import defaultdict
+from datetime import date
 from decimal import Decimal
 
 import psycopg
@@ -119,6 +120,87 @@ def portfolio():
             }
             for t, i, p, q, mv in sorted(rows, key=lambda r: -r[4])
         ],
+    }
+
+
+# ---------------------------------------------------------------- overview (home screen)
+
+# Design classes: fixed income + Tesouro, stocks + ETFs, FII + Fiagro.
+CLASS_OF_TYPE = {
+    "fixed_income": "rf", "treasury": "rf", "stock": "acoes", "etf": "acoes", "fii": "fii", "fiagro": "fii",
+}
+MAX_POSITION_PERCENT = Decimal(10)  # concentration limit per asset; becomes a user setting later
+MISSING_PANELS = ["history", "targets", "sectors", "emergency_reserve", "calendar"]
+
+
+def _last_12_months(today: date) -> list[str]:
+    months, year, month = [], today.year, today.month
+    for _ in range(12):
+        months.append(f"{year}-{month:02d}")
+        month -= 1
+        if month == 0:
+            year, month = year - 1, 12
+    return months[::-1]
+
+
+@router.get("/overview")
+def overview():
+    """Everything the home screen needs that exists today. `missing` lists the panels whose
+    data does not exist yet (history, targets, sectors, emergency reserve, calendar): the
+    screen shows an honest empty state for them instead of invented numbers."""
+    portfolio_data = portfolio()  # same valuation as /api/portfolio
+    total = Decimal(str(portfolio_data["totals"]["market_value"]))
+    positions = portfolio_data["positions"]
+
+    with connect() as conn:
+        contributed = conn.execute(
+            "SELECT COALESCE(SUM(CASE WHEN kind = 'buy' THEN total_value ELSE -total_value END), 0) FROM transactions"
+        ).fetchone()[0]
+        monthly = dict(conn.execute(
+            "SELECT to_char(pay_date, 'YYYY-MM'), SUM(net_amount) FROM payouts GROUP BY 1"
+        ).fetchall())
+
+    months = _last_12_months(date.today())
+    payout_months = [{"month": m, "total": num(monthly.get(m, ZERO))} for m in months]
+    payouts_12m = sum((monthly.get(m, ZERO) for m in months), ZERO)
+
+    by_class = defaultdict(lambda: ZERO)
+    for p in positions:
+        by_class[CLASS_OF_TYPE.get(p["type"], "outros")] += Decimal(str(p["market_value"]))
+    allocation = [
+        {"class": c, "value": num(by_class[c]), "weight": num(by_class[c] / total * 100, 2) if total else 0,
+         "target": None}
+        for c in ("rf", "acoes", "fii") if c in by_class
+    ]
+
+    risky = [p for p in positions if CLASS_OF_TYPE.get(p["type"]) in ("acoes", "fii")]
+    largest = max(risky, key=lambda p: p["market_value"], default=None)
+    largest_json = None
+    alerts = []
+    if largest and total:
+        weight = Decimal(str(largest["market_value"])) / total * 100
+        largest_json = {"ticker": largest["ticker"], "weight": num(weight, 2), "limit": num(MAX_POSITION_PERCENT, 0)}
+        for p in risky:
+            w = Decimal(str(p["market_value"])) / total * 100
+            if w > MAX_POSITION_PERCENT:
+                alerts.append({"kind": "concentration", "text": f"{p['ticker']} com {w:.1f}% da carteira (máx. {MAX_POSITION_PERCENT:.0f}%)"})
+
+    return {
+        "quotes_as_of": portfolio_data["totals"]["quotes_as_of"],
+        "total": num(total),
+        "contributed": num(contributed),
+        "appreciation": num(total - contributed),
+        "appreciation_share": num((total - contributed) / total * 100, 1) if total else 0,
+        "payouts": {
+            "months": payout_months,
+            "total_12m": num(payouts_12m),
+            "this_month": payout_months[-1]["total"],
+            "monthly_average": num(payouts_12m / 12),
+        },
+        "largest_position": largest_json,
+        "allocation": allocation,
+        "alerts": alerts,
+        "missing": MISSING_PANELS,
     }
 
 
