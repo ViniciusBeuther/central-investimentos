@@ -19,6 +19,7 @@ services:
     build: ./backend
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-central}:${POSTGRES_PASSWORD:-central}@db:5432/${POSTGRES_DB:-central}
+      BRAPI_TOKEN: ${BRAPI_TOKEN:-}  # free token from brapi.dev, put it in .env (git-ignored)
     ports:
       - "8000:8000"
     volumes:
@@ -26,6 +27,18 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  worker:  # refreshes quotes automatically during market hours (see backend/app/worker.py)
+    build: ./backend
+    command: python -u -m app.worker
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-central}:${POSTGRES_PASSWORD:-central}@db:5432/${POSTGRES_DB:-central}
+      BRAPI_TOKEN: ${BRAPI_TOKEN:-}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - api
+    restart: unless-stopped
 
   web:
     build: ./frontend
