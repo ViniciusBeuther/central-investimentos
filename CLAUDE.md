@@ -80,6 +80,8 @@ brapi.dev/yfinance (quotes), Central Bank SGS (CDI, Selic, IPCA), Tesouro Transp
 - `database.md`: approved schema (DDL, decisions, open questions).
 - `import.md`: design of the B3 file import (idempotent, preview, validations).
 - `corporate-actions.md`: splits, reverse splits, bonus and fractions.
+- `api.md`: read-only endpoints for the screens.
+- `fixed-income.md`: CDB/LCA/Tesouro model, imported data, caveats.
 - `payouts.md`: payouts import and the quantity cross-check against B3.
 - `positions.md`: weighted average calculation, tests, comparison with the old system.
 
@@ -118,11 +120,13 @@ brapi.dev/yfinance (quotes), Central Bank SGS (CDI, Selic, IPCA), Tesouro Transp
       idempotent; positions by weighted average done and compared with the old system,
       see `docs/positions.md`; corporate events imported from Movimentação and applied;
       payouts imported and cross-checked, see `docs/payouts.md`;
-      next: fixed income import, bonus cost per share)
+      fixed income imported, see `docs/fixed-income.md`;
+      next: bonus cost per share)
 - [ ] Corporate actions (split, reverse split, bonus, fractions: imported and applied;
       KLBN transfers done; missing: bonus cost per share, manual entry form)
-- [ ] Minimal API and screens (portfolio, totals, payouts)
-- [ ] Fixed income module
+- [ ] Minimal API and screens (portfolio, totals, payouts): read-only API done, see
+      `docs/api.md`; screens by Claude Design, in progress
+- [ ] Fixed income module (import done; missing: index/rate, current value estimate)
 - [ ] CVM collector (1 source, 1 asset) and document storage
 - [ ] Summary with verified quotes (`claude -p`)
 - [ ] Nightly scheduling (`launchd`) and digest
