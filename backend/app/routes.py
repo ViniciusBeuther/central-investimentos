@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.importers.payouts import PayoutRow, check_quantities
 from app.positions import compute_position
 from app.positions_report import load_events
+from app.quotes import latest_quotes, refresh
 
 router = APIRouter(prefix="/api")
 
@@ -63,33 +64,74 @@ def _position_json(ticker: str, info: dict, p) -> dict:
 
 @router.get("/portfolio")
 def portfolio():
-    """Open positions, totals and the distribution by asset type."""
+    """Open positions, totals and the distribution by asset type.
+
+    Quoted assets (stock, FII, Fiagro, ETF with a stored quote) are valued at market price.
+    The rest (fixed income, Tesouro, or no quote yet) are valued at cost: `valued_by` says which.
+    """
     with connect() as conn:
         positions = _positions(conn)
         payouts_total = conn.execute("SELECT COALESCE(SUM(net_amount), 0) FROM payouts").fetchone()[0]
+        quotes = latest_quotes(conn)
 
     open_positions = [(t, i, p) for t, i, p in positions if p.quantity > EPSILON]
     invested = sum((p.cost for _, _, p in open_positions), ZERO)
-    by_type = defaultdict(lambda: ZERO)
-    for _, info, p in open_positions:
-        by_type[info["type"]] += p.cost
+
+    rows = []
+    for ticker, info, p in open_positions:
+        quote = quotes.get(ticker)
+        market_value = p.quantity * quote[0] if quote else p.cost
+        rows.append((ticker, info, p, quote, market_value))
+    market_total = sum((r[4] for r in rows), ZERO)
+    quoted = [r for r in rows if r[3]]
+
+    by_type = defaultdict(lambda: [ZERO, ZERO])  # [invested, market value]
+    for _, info, p, _, market_value in rows:
+        by_type[info["type"]][0] += p.cost
+        by_type[info["type"]][1] += market_value
 
     return {
         "totals": {
             "invested": num(invested),
+            "market_value": num(market_total),
+            # Only for quoted assets, so unquoted cost does not look like a gain or loss.
+            "unrealized_profit": num(sum((r[4] - r[2].cost for r in quoted), ZERO)),
             "realized_profit": num(sum((p.realized_profit for _, _, p in positions), ZERO)),
             "payouts_received": num(payouts_total),
             "open_positions": len(open_positions),
+            "quoted_positions": len(quoted),
+            "quotes_as_of": min((r[3][1] for r in quoted), default=None) and min(r[3][1] for r in quoted).isoformat(),
         },
         "by_type": [
-            {"type": t, "invested": num(c), "share": num(c / invested, 4) if invested else 0}
-            for t, c in sorted(by_type.items(), key=lambda kv: -kv[1])
+            {"type": t, "invested": num(c), "market_value": num(m),
+             "share": num(m / market_total, 4) if market_total else 0}
+            for t, (c, m) in sorted(by_type.items(), key=lambda kv: -kv[1][1])
         ],
         "positions": [
-            {**_position_json(t, i, p), "share": num(p.cost / invested, 4) if invested else 0}
-            for t, i, p in sorted(open_positions, key=lambda x: -x[2].cost)
+            {
+                **_position_json(t, i, p),
+                "price": num(q[0], 4) if q else None,
+                "quoted_at": q[1].isoformat() if q else None,
+                "market_value": num(mv),
+                "unrealized_profit": num(mv - p.cost) if q else None,
+                "valued_by": "quote" if q else "cost",
+                "share": num(mv / market_total, 4) if market_total else 0,
+            }
+            for t, i, p, q, mv in sorted(rows, key=lambda r: -r[4])
         ],
     }
+
+
+@router.post("/quotes/refresh")
+def quotes_refresh():
+    """Fetch fresh quotes now. At most once every 5 minutes (protects the free plan quota)."""
+    with connect() as conn:
+        recent = conn.execute("SELECT max(fetched_at) > now() - interval '5 minutes' FROM quotes").fetchone()[0]
+        if recent:
+            return {"skipped": True, "reason": "quotes were fetched less than 5 minutes ago",
+                    "fetched": 0, "failures": {}}
+        quotes, failures = refresh(conn, token=os.environ.get("BRAPI_TOKEN") or None)
+    return {"skipped": False, "fetched": len(quotes), "failures": failures}
 
 
 @router.get("/positions/{ticker}")
