@@ -11,6 +11,7 @@ average price 4, quantity 8). Names are English; dates are ISO (`2026-09-23`).
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/portfolio` | `totals` (invested, realized profit, payouts received, open positions), `by_type` (invested + share), `positions` (open ones: ticker, name, type, quantity, average_price, cost, share, warnings) |
+| `GET /api/overview` | Home screen: total, net contributions, appreciation (market value minus net contributions), payouts of the last 12 months, largest risk position vs limit, allocation by class (`rf`, `acoes`, `fii`), alerts, and `missing` (panels without data yet) |
 | `GET /api/positions/{ticker}` | One asset: the position, a `timeline` of buys, sells and corporate events with `quantity_after`/`cost_after` (explains the number event by event), and its payouts. 404 if unknown |
 | `GET /api/payouts?year=&ticker=` | Total, `by_month`, `by_kind`, `by_asset` and the `items` |
 | `POST /api/quotes/refresh` | Fetch fresh quotes now (max once per 5 min); returns `fetched` and per-ticker `failures`. `/api/portfolio` then shows `price`, `market_value`, `unrealized_profit`, `valued_by` per position |

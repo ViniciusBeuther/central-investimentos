@@ -130,7 +130,8 @@ brapi.dev/yfinance (quotes), Central Bank SGS (CDI, Selic, IPCA), Tesouro Transp
       KLBN transfers done; missing: bonus cost per share, manual entry form)
 - [ ] Minimal API and screens (portfolio, totals, payouts): read-only API and brapi quotes done (verified with the real token: 21 of 21
       quotable positions), see `docs/api.md`, `docs/quotes.md`; automatic refresh (`worker`) done; frontend data layer and a plain home page
-      done (`docs/frontend.md`); the visual design from Claude Design is next
+      done (`docs/frontend.md`); design "Main" (Tela 1) implemented
+      with real data where it exists (`docs/frontend.md`); next: targets/sectors/history
 - [ ] Fixed income module (import done; missing: index/rate, current value estimate)
 - [ ] CVM collector (1 source, 1 asset) and document storage
 - [ ] Summary with verified quotes (`claude -p`)
