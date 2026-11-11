@@ -10,6 +10,10 @@ Implemented in `backend/alembic/`; the first migration is `0001_initial_schema.p
 creates the tables below. The project has no ORM models, so migrations are plain SQL via
 `op.execute` and autogenerate is not used. `DATABASE_URL` comes from the environment.
 
+The API container runs `alembic upgrade head` on every start (see `backend/Dockerfile`),
+so `docker compose up -d` is enough; if a migration fails the container exits. Manual
+commands, when needed:
+
 ```
 docker compose exec api alembic upgrade head      # apply
 docker compose exec api alembic current           # which version the DB is at

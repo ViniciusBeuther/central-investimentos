@@ -25,7 +25,8 @@ system informs, summarizes and suggests, never orders.
 ## Stack and running
 - Backend: Python + FastAPI (`backend/`). Frontend: React + Vite + TS (`frontend/`).
 - Database: PostgreSQL. Migrations: Alembic, hand-written SQL (no ORM). All in Docker Compose.
-- Run: `docker compose up -d --build`, then `docker compose exec api alembic upgrade head`
+- Run: `docker compose up -d` (add `--build` only after changing a Dockerfile or
+  `requirements.txt`). The API container applies pending migrations on startup.
   - Frontend: http://localhost:3000 (the Mac's port 5173 is used by another project)
   - API: http://localhost:8000/api/health | Postgres: localhost:5432
 - The frontend calls `/api/...` and Vite proxies it to the API (no CORS).
