@@ -1,4 +1,6 @@
 .env
+backend/temp-data/
+*.xlsx
 node_modules/
 __pycache__/
 *.pyc
