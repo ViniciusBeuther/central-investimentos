@@ -24,8 +24,8 @@ system informs, summarizes and suggests, never orders.
 
 ## Stack and running
 - Backend: Python + FastAPI (`backend/`). Frontend: React + Vite + TS (`frontend/`).
-- Database: PostgreSQL. Migrations: Alembic (to be set up). All in Docker Compose.
-- Run: `docker compose up -d --build`
+- Database: PostgreSQL. Migrations: Alembic, hand-written SQL (no ORM). All in Docker Compose.
+- Run: `docker compose up -d --build`, then `docker compose exec api alembic upgrade head`
   - Frontend: http://localhost:3000 (the Mac's port 5173 is used by another project)
   - API: http://localhost:8000/api/health | Postgres: localhost:5432
 - The frontend calls `/api/...` and Vite proxies it to the API (no CORS).
@@ -76,6 +76,7 @@ brapi.dev/yfinance (quotes), Central Bank SGS (CDI, Selic, IPCA), Tesouro Transp
 
 ## Topic docs (`docs/`)
 - `legacy-system-rules.md`: rules, bugs and data anomalies found in the old system.
+- `database.md`: approved schema (DDL, decisions, open questions).
 - `import.md`: design of the B3 file import (idempotent, preview, validations).
 - `corporate-actions.md`: splits, reverse splits, bonus and fractions.
 
@@ -89,17 +90,29 @@ brapi.dev/yfinance (quotes), Central Bank SGS (CDI, Selic, IPCA), Tesouro Transp
 - The user makes the important engineering decisions: recommend, present alternatives.
 
 ## Open items
-- Data anomalies the user must verify against brokerage notes (details in
-  `docs/legacy-system-rules.md`): CPTS11 x3 and BBAS3F `Valor`, Tesouro IPCA+ 2055
-  `Preço`, TASA4F bonus, WEGE3 JCP duplicate.
-- Fixed income: Tesouro appears in B3 files; CDB/LCI/LCA do not. Confirm which exist.
+- Data anomalies are explained by the raw B3 files (see `docs/legacy-system-rules.md`).
+  Only missing: cost per bonus share (company notices).
+- The old spreadsheet is NOT a reliable import source (hand-edited rows). Raw B3 files
+  (trades 2022-12 → 2026-09; payouts 2023-2026, one file per year) are in
+  `backend/temp-data/` (git-ignored; never commit). Use them for the importer.
+- Raw trades have no corporate events; they come from the B3 Movimentação report
+  (`movimentacao-*.xlsx` in `backend/temp-data/`), which also has fixed income and
+  position snapshots (`Atualização`). Details in `docs/import.md`.
+- Raw payout files contain identical repeated lines (7 across files); keep both, as they
+  come from B3 (occurrence counter).
+- Fixed income: the B3 Movimentação report has Tesouro, 2 CDBs and 1 LCA (purchase,
+  maturity, interest, units and unit price) but not the index/rate: the user supplies
+  those once per product. Confirm no other fixed income lives outside B3.
 - Authentication mechanism (single-user login is the simplest).
-- How past corporate actions (e.g. Americanas) were handled in the old spreadsheet.
+- Asset conversion event (KLBN11 → KLBN3 + KLBN4, `Transferência`) is not modeled yet;
+  design it when implementing corporate actions (`docs/corporate-actions.md`).
+- Idea to adopt: validate computed positions against the `Quantidade` of each payout row.
 
 ## Roadmap
 - [x] Skeleton: Docker Compose with db + api + web, verified end to end
 - [x] Read `Wallet.py`, document legacy rules and data anomalies
-- [ ] Draft database schema (user review), Alembic, first migration
+- [x] Database schema drafted and approved (`docs/database.md`)
+- [x] Alembic and first migration (`0001`, verified; see `docs/database.md`)
 - [ ] B3 file importer, totals checked against the old system
 - [ ] Corporate actions (split, reverse split, bonus, fractions)
 - [ ] Minimal API and screens (portfolio, totals, payouts)
