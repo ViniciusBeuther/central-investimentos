@@ -3,7 +3,10 @@ import os
 import psycopg
 from fastapi import FastAPI
 
+from app.routes import router
+
 app = FastAPI(title="Central de Investimentos")
+app.include_router(router)
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 

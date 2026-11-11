@@ -1,8 +1,12 @@
 """Read the B3 'Movimentação' export (corporate events, fixed income, position snapshots).
 
-Parses, classifies and reports. With --commit it also writes the corporate events (split,
-reverse split, bonus, fraction + its auction cash, transfers between tickers) to
-`corporate_actions`. Fixed income and snapshots are NOT written yet.
+Parses, classifies and reports. With --commit it also writes:
+- corporate events (split, reverse split, bonus, fraction + auction cash, transfers between
+  tickers) to `corporate_actions`;
+- fixed income (CDB, LCA, Tesouro): purchases and redemptions as `transactions`, CDB/LCA
+  interest as `payouts`, and an empty `fixed_income_terms` row per product (index and rate
+  come from the user). Tesouro coupons come from the Proventos file, not from here.
+Snapshots (`Atualização`) are not written.
 
     docker compose exec api python -W ignore -m app.importers.movements "temp-data/<file>.xlsx"
     docker compose exec api python -W ignore -m app.importers.movements "temp-data/<file>.xlsx" --commit
@@ -25,7 +29,8 @@ from decimal import Decimal
 import psycopg
 from openpyxl import load_workbook
 
-from app.importers.trades import _canonical, _to_date, _to_decimal, suggest_type
+from app.importers.payouts import PayoutRow, import_payouts
+from app.importers.trades import TradeRow, _canonical, _to_date, _to_decimal, import_trades, suggest_type
 
 REQUIRED_COLUMNS = [
     "Entrada/Saída",
@@ -275,6 +280,103 @@ def import_actions(
     return added, updated, skipped
 
 
+def write_asset_names(conn, rows: list[MovementRow]) -> int:
+    """Fill assets.name from 'TICKER - COMPANY NAME' (only where it is still empty)."""
+    names = {}
+    for r in rows:
+        if r.ticker and " - " in r.product:
+            names[r.ticker] = r.product.split(" - ", 1)[1].strip()
+    updated = 0
+    for ticker, name in names.items():
+        updated += conn.execute(
+            "UPDATE assets SET name = %s WHERE ticker = %s AND name IS NULL", (name, ticker)
+        ).rowcount
+    return updated
+
+
+# ---------------------------------------------------------------- fixed income
+
+
+@dataclass(frozen=True)
+class FixedIncomePlan:
+    assets: dict  # ticker -> (type, name, issuer, maturity_date or None)
+    trades: list  # TradeRow
+    payouts: list  # PayoutRow
+    notes: list
+
+
+def parse_fixed_income_product(product: str) -> tuple[str, str, str | None, str]:
+    """'CDB - CDB223RB92P - BANCO BMG S/A' -> (ticker, type, issuer, name).
+
+    The code is the ticker; Tesouro has no code, so its name is the ticker (same as in the
+    Proventos file).
+    """
+    parts = [p.strip() for p in product.split(" - ")]
+    if parts[0] in ("CDB", "LCA", "LCI", "LC", "CRI", "CRA", "DEBENTURE") and len(parts) >= 2:
+        return parts[1], "fixed_income", (parts[2] if len(parts) > 2 else None), product
+    if product.startswith("Tesouro"):
+        return product, "treasury", None, product
+    return product, "fixed_income", None, product
+
+
+def plan_fixed_income(rows: list[MovementRow]) -> FixedIncomePlan:
+    assets, trades, payouts, notes = {}, [], [], []
+    seen: Counter = Counter()
+    for r in sorted((r for r in rows if classify(r) == "fixed_income"), key=lambda r: (r.event_date, r.product)):
+        ticker, asset_type, issuer, name = parse_fixed_income_product(r.product)
+        if r.quantity is None or r.value is None:
+            notes.append(f"{r.event_date} {ticker}: {r.movement} without quantity or value, skipped")
+            continue
+        maturity = assets.get(ticker, (None, None, None, None))[3]
+
+        if r.movement == "PAGAMENTO DE JUROS":
+            fingerprint = hashlib.sha256(
+                "|".join([r.event_date.isoformat(), ticker, r.movement, _canonical(r.quantity),
+                          _canonical(r.value), r.institution]).encode()
+            ).hexdigest()
+            seen[fingerprint] += 1
+            payouts.append(PayoutRow(r.event_date, ticker, "interest", r.movement, r.quantity, r.value,
+                                     r.institution, fingerprint, seen[fingerprint]))
+        else:
+            if r.movement in ("COMPRA / VENDA", "Compra"):
+                kind = "buy" if r.direction == "Credito" else "sell"
+            elif r.movement == "VENCIMENTO/RESGATE SALDO EM CONTA":
+                kind = "sell"
+                maturity = r.event_date
+            else:
+                notes.append(f"{r.event_date} {ticker}: unhandled {r.movement}, skipped")
+                continue
+            fingerprint = hashlib.sha256(
+                "|".join([r.event_date.isoformat(), r.product, kind, _canonical(r.quantity),
+                          _canonical(r.value), r.institution]).encode()
+            ).hexdigest()
+            seen[fingerprint] += 1
+            trades.append(TradeRow(r.event_date, kind, ticker, r.product, r.quantity, r.value,
+                                   r.institution, fingerprint, seen[fingerprint]))
+        assets[ticker] = (asset_type, name, issuer, maturity)
+    return FixedIncomePlan(assets, trades, payouts, notes)
+
+
+def import_fixed_income(conn, plan: FixedIncomePlan, filename: str) -> dict:
+    """Write in ONE transaction. Returns counts. Caller commits."""
+    types = {ticker: info[0] for ticker, info in plan.assets.items()}
+    added_trades, skipped_trades = import_trades(conn, plan.trades, filename, types, source="movements")
+    added_payouts, skipped_payouts = import_payouts(conn, plan.payouts, filename, types, source="movements")
+    for ticker, (_, name, issuer, maturity) in plan.assets.items():
+        asset_id = conn.execute("UPDATE assets SET name = COALESCE(name, %s) WHERE ticker = %s RETURNING id",
+                                (name, ticker)).fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO fixed_income_terms (asset_id, issuer, maturity_date) VALUES (%s, %s, %s)
+            ON CONFLICT (asset_id) DO UPDATE SET
+              issuer = COALESCE(fixed_income_terms.issuer, EXCLUDED.issuer),
+              maturity_date = COALESCE(fixed_income_terms.maturity_date, EXCLUDED.maturity_date)
+            """,
+            (asset_id, issuer, maturity),
+        )
+    return {"trades": (added_trades, skipped_trades), "payouts": (added_payouts, skipped_payouts)}
+
+
 # ---------------------------------------------------------------- command line
 
 
@@ -334,11 +436,25 @@ def main() -> None:
             print("  new assets to create:", ", ".join(f"{t} ({k})" for t, k in new_assets.items()))
         for note in notes:
             print("  skipped:", note)
+        plan = plan_fixed_income(rows)
+        print(f"\nFixed income: {len(plan.assets)} products, {len(plan.trades)} buys/redemptions, "
+              f"{len(plan.payouts)} interest payments")
+        for t in plan.trades:
+            print(f"  {t.trade_date} {t.kind:4} {t.ticker[:28]:28} qty {t.quantity:>10} value {t.total_value:>9}")
+        for p in plan.payouts:
+            print(f"  {p.pay_date} interest {p.ticker[:28]:28} qty {p.quantity_held:>10} value {p.net_amount:>9}")
+        for note in plan.notes:
+            print("  skipped:", note)
         if not args.commit:
             print("\nDry run: nothing written. Add --commit to import.")
             return
-        added, updated, skipped = import_actions(conn, actions, new_assets, os.path.basename(args.file))
-        print(f"\nImported: {added} added, {updated} updated with auction cash, {skipped} skipped.")
+        filename = os.path.basename(args.file)
+        write_asset_names(conn, rows)
+        added, updated, skipped = import_actions(conn, actions, new_assets, filename)
+        print(f"\nCorporate events: {added} added, {updated} updated with auction cash, {skipped} skipped.")
+        counts = import_fixed_income(conn, plan, filename)
+        print(f"Fixed income trades: {counts['trades'][0]} added, {counts['trades'][1]} skipped; "
+              f"interest: {counts['payouts'][0]} added, {counts['payouts'][1]} skipped.")
 
 
 if __name__ == "__main__":

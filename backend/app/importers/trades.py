@@ -190,7 +190,9 @@ def existing_keys(conn) -> set[tuple[str, int]]:
     return {(r[0], r[1]) for r in conn.execute("SELECT fingerprint, occurrence FROM transactions")}
 
 
-def import_trades(conn, rows: list[TradeRow], filename: str, types: dict[str, str]) -> tuple[int, int]:
+def import_trades(
+    conn, rows: list[TradeRow], filename: str, types: dict[str, str], source: str = "trades"
+) -> tuple[int, int]:
     """Write the rows in ONE transaction. Returns (added, skipped). Caller commits."""
     asset_ids = {ticker: asset_id for ticker, asset_id in conn.execute("SELECT ticker, id FROM assets")}
     for ticker in sorted({r.ticker for r in rows} - asset_ids.keys()):
@@ -202,8 +204,8 @@ def import_trades(conn, rows: list[TradeRow], filename: str, types: dict[str, st
 
     batch_id = conn.execute(
         "INSERT INTO import_batches (source, filename, rows_added, rows_skipped) "
-        "VALUES ('trades', %s, 0, 0) RETURNING id",
-        (filename,),
+        "VALUES (%s, %s, 0, 0) RETURNING id",
+        (source, filename),
     ).fetchone()[0]
 
     added = 0

@@ -180,7 +180,9 @@ def check_quantities(rows: list[PayoutRow], trades: dict, actions: dict) -> dict
 # ---------------------------------------------------------------- database
 
 
-def import_payouts(conn, rows: list[PayoutRow], filename: str, types: dict[str, str]) -> tuple[int, int]:
+def import_payouts(
+    conn, rows: list[PayoutRow], filename: str, types: dict[str, str], source: str = "payouts"
+) -> tuple[int, int]:
     """Write one file in ONE transaction. Returns (added, skipped). Caller commits."""
     asset_ids = {ticker: asset_id for ticker, asset_id in conn.execute("SELECT ticker, id FROM assets")}
     for ticker in sorted({r.ticker for r in rows} - asset_ids.keys()):
@@ -192,8 +194,8 @@ def import_payouts(conn, rows: list[PayoutRow], filename: str, types: dict[str, 
 
     batch_id = conn.execute(
         "INSERT INTO import_batches (source, filename, rows_added, rows_skipped) "
-        "VALUES ('payouts', %s, 0, 0) RETURNING id",
-        (filename,),
+        "VALUES (%s, %s, 0, 0) RETURNING id",
+        (source, filename),
     ).fetchone()[0]
     added = 0
     for r in rows:
